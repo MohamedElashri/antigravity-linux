@@ -1,0 +1,171 @@
+name: package
+
+# Produce .deb + .rpm for the Antigravity family (x86-64 and arm64) from the
+# upstream Linux tarballs and publish them to a GitHub Release tagged
+# <product>-v<version>.
+#
+# Two products share this workflow:
+#   - antigravity      (hub channel; resolved from its official releases API)
+#   - antigravity-ide  (resolved from its official releases API)
+#
+# Triggers:
+#   - workflow_dispatch: package one explicit product + version. CHANNEL=hub
+#     auto-resolves the official source for either product; stable/custom take
+#     explicit URLs (needed only for a specific OLDER IDE build).
+#   - schedule: discovers the latest version of BOTH products and, for any that
+#     is not yet released, dispatches a build run for it. (workflow_dispatch is
+#     the one event the GITHUB_TOKEN is allowed to trigger recursively.)
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: "Product"
+        required: true
+        type: choice
+        default: antigravity
+        options: [antigravity, antigravity-ide]
+      version:
+        description: "Version, e.g. 2.3.1 or 2.1.1"
+        required: true
+        type: string
+      channel:
+        description: "Channel (hub = auto-resolve official source)"
+        required: true
+        type: choice
+        default: hub
+        options: [hub, stable, custom]
+      url_x64:
+        description: "Explicit x64 tarball URL (stable/custom only)"
+        required: false
+        type: string
+      url_arm:
+        description: "Explicit arm tarball URL (stable/custom only)"
+        required: false
+        type: string
+  schedule:
+    # every 6 hours, off the round minute
+    - cron: "23 */6 * * *"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  discover:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        product: [antigravity, antigravity-ide]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover new ${{ matrix.product }} version and dispatch build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          product="${{ matrix.product }}"
+          case "$product" in
+            antigravity) release="$(./packaging/resolve-version.sh)" ;;
+            antigravity-ide) release="$(./packaging/resolve-ide.sh)" ;;
+          esac
+          latest="${release%%$'\n'*}"
+          [ -n "$latest" ] || { echo "No release found for $product" >&2; exit 1; }
+          echo "Latest $product: $latest"
+
+          tag="${product}-v${latest}"
+          if gh release view "$tag" -R "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "$tag is already released"
+          else
+            echo "New $product $latest -> dispatching build"
+            gh workflow run build.yml -R "${{ github.repository }}" \
+              -f product="$product" -f version="$latest" -f channel=hub
+          fi
+
+  build:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nfpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build packages
+        env:
+          PRODUCT: ${{ inputs.product }}
+          VERSION: ${{ inputs.version }}
+          ARCH: ${{ matrix.arch }}
+          CHANNEL: ${{ inputs.channel }}
+          URL_X64: ${{ inputs.url_x64 }}
+          URL_ARM: ${{ inputs.url_arm }}
+        run: ./packaging/build.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ inputs.product }}-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      PRODUCT: ${{ inputs.product }}
+      VER: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Stage assets and checksums
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          cp dist/*.deb dist/*.rpm assets/
+          ( cd assets && sha256sum *.deb *.rpm > "checksums_${PRODUCT}_${VER}.txt" )
+          echo "Assets:"; ls -lh assets/
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${PRODUCT}-v${VER}"
+          DISPLAY="Antigravity"; [ "$PRODUCT" = "antigravity-ide" ] && DISPLAY="Antigravity IDE"
+          {
+            echo "${DISPLAY} ${VER} — unofficial Linux packages"
+            echo
+            echo "Repackaged from Google's official Linux tarball. This software is (c) Google LLC."
+            echo "See the repo README/NOTICE for install instructions and disclaimers."
+            echo
+            echo "## Assets"
+            for f in assets/*.deb assets/*.rpm assets/checksums_*.txt; do
+              echo "- \`$(basename "$f")\`"
+            done
+          } > /tmp/notes.md
+
+          if gh release view "$TAG" -R "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG exists; uploading/clobbering assets."
+            gh release upload "$TAG" assets/* -R "${{ github.repository }}" --clobber
+          else
+            gh release create "$TAG" assets/* \
+              -R "${{ github.repository }}" \
+              --title "${DISPLAY} ${VER} (unofficial)" \
+              --notes-file /tmp/notes.md
+          fi
