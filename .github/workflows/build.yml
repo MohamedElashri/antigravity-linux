@@ -1,20 +1,5 @@
 name: package
 
-# Produce .deb + .rpm for the Antigravity family (x86-64 and arm64) from the
-# upstream Linux tarballs and publish them to a GitHub Release tagged
-# <product>-v<version>.
-#
-# Two products share this workflow:
-#   - antigravity      (hub channel; resolved from its official releases API)
-#   - antigravity-ide  (resolved from its official releases API)
-#
-# Triggers:
-#   - workflow_dispatch: package one explicit product + version. CHANNEL=hub
-#     auto-resolves the official source for either product; stable/custom take
-#     explicit URLs (needed only for a specific OLDER IDE build).
-#   - schedule: discovers the latest version of BOTH products and, for any that
-#     is not yet released, dispatches a build run for it. (workflow_dispatch is
-#     the one event the GITHUB_TOKEN is allowed to trigger recursively.)
 on:
   workflow_dispatch:
     inputs:
@@ -43,7 +28,6 @@ on:
         required: false
         type: string
   schedule:
-    # every 6 hours, off the round minute
     - cron: "23 */6 * * *"
 
 permissions:

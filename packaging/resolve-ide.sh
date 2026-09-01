@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Resolve an Antigravity IDE stable version + Linux tarball URLs using the
-# official releases API consumed by antigravity.google.
-#
-# Usage: resolve-ide.sh [version]
-# Prints three lines:
-#   <version>      (latest when the argument is omitted)
-#   <linux-x64 url>
-#   <linux-arm url>
 set -euo pipefail
 VER="${1:-}"
 API="https://antigravity-ide-auto-updater-974169037036.us-central1.run.app/releases"

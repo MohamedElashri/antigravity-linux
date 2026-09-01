@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Resolve a release from one of the official Antigravity /releases APIs.
-#
-# Usage: resolve-release.sh <releases-api> [version]
-# Prints two lines:
-#   <version>
-#   <execution-id>
-#
-# With no version, the highest semantic version is selected.  When Google
-# republishes the same version, the first entry returned by the API wins.
 set -euo pipefail
 
 API="${1:?releases API URL required}"

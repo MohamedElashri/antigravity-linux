@@ -6,7 +6,7 @@ release: 1
 epoch: 0
 section: devel
 priority: optional
-maintainer: "treadonsnow <150224887+unfallenwill@users.noreply.github.com>"
+maintainer: "Mohamed Elashri <git@elashri.com>"
 description: |
   ${P_DISPLAY} - ${P_GENERIC} (unofficial Linux package).
   .
@@ -17,7 +17,7 @@ description: |
   official Linux build for convenient apt/dnf installation.
   .
   Official site: https://antigravity.google
-vendor: "Google LLC (packaged unofficially by treadonsnow)"
+vendor: "Google LLC (packaged unofficially by Mohamed Elashri)"
 homepage: https://antigravity.google
 license: "Proprietary - Google LLC"
 
@@ -31,8 +31,6 @@ deb:
 rpm:
   group: Development/Tools
 
-# Dependencies differ between dpkg and rpm families, so declare them per
-# packager via overrides.
 overrides:
   deb:
     depends:

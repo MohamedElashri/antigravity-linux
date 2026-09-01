@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Resolve a hub-channel Antigravity version to its Linux tarball URLs using
-# the official releases API consumed by antigravity.google.
-#
-# Usage: resolve-version.sh [version]
-# Prints three lines:
-#   <version>       (latest when the argument is omitted)
-#   <linux-x64 url>
-#   <linux-arm url>
 set -euo pipefail
 VER="${1:-}"
 API="https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/releases"

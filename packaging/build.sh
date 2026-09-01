@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-# Repackage an official Antigravity-family Linux tarball into .deb and .rpm.
-#
-# Inputs (env):
-#   PRODUCT  (required)  antigravity | antigravity-ide
-#   VERSION  (required)  upstream version, e.g. 2.1.4
-#   ARCH     (required)  x64 | arm
-#   CHANNEL  (optional)  hub (default) | stable | custom
-#   URL_X64  (optional)  explicit x64 tarball URL (stable/custom)
-#   URL_ARM  (optional)  explicit arm tarball URL (stable/custom)
-#
-# For CHANNEL=hub the build-id is resolved from the product's official releases
-# API, so callers only need PRODUCT and VERSION. Other channels require an
-# explicit URL_X64 / URL_ARM for each built architecture.
 set -euo pipefail
 
 PRODUCT="${PRODUCT:?PRODUCT is required (antigravity | antigravity-ide)}"
@@ -21,7 +8,6 @@ CHANNEL="${CHANNEL:-hub}"
 URL_X64="${URL_X64:-}"
 URL_ARM="${URL_ARM:-}"
 
-# --- Product profile ---------------------------------------------------------
 case "$PRODUCT" in
   antigravity)
     PKG_NAME=antigravity;  P_BIN=antigravity;      P_INST=/opt/antigravity
@@ -33,11 +19,6 @@ case "$PRODUCT" in
     P_ICON=antigravity-ide; P_WMCLASS=antigravity-ide; P_SCHEME=antigravity-ide ;;
   *) echo "Unknown PRODUCT: $PRODUCT" >&2; exit 1 ;;
 esac
-
-# CHANNEL=hub means "resolve the official source for this product":
-#   antigravity     -> hub releases API (resolve-version.sh)
-#   antigravity-ide -> IDE releases API (resolve-ide.sh)
-# stable/custom take explicit URL_X64 / URL_ARM.
 
 case "$ARCH" in
   x64) DEB_ARCH=amd64; RPM_ARCH=x86_64 ;;
@@ -54,7 +35,6 @@ trap 'rm -rf "$WORK"' EXIT
 # render(): expand ${VAR} from the environment. Needs only perl (always present).
 render() { perl -pe 's/\$\{(\w+)\}/defined $ENV{$1} ? $ENV{$1} : ""/ge' "$1" > "$2"; }
 
-# --- Resolve the tarball URL for this arch -----------------------------------
 if [ "$ARCH" = x64 ] && [ -n "$URL_X64" ]; then
   URL="$URL_X64"
 elif [ "$ARCH" = arm ] && [ -n "$URL_ARM" ]; then
@@ -65,7 +45,7 @@ elif [ "$CHANNEL" = hub ]; then
     antigravity)     mapfile -t RES < <("$ROOT/packaging/resolve-version.sh" "$VERSION") ;;
     antigravity-ide) mapfile -t RES < <("$ROOT/packaging/resolve-ide.sh" "$VERSION") ;;
   esac
-  VERSION="${RES[0]}"          # resolver prints the (possibly discovered) version
+  VERSION="${RES[0]}"
   [ "$ARCH" = x64 ] && URL="${RES[1]}" || URL="${RES[2]}"
   BUILD_ID="$(printf '%s' "${RES[1]}" | sed -E 's#.*/[0-9]+\.[0-9]+\.[0-9]+-([0-9]+)/.*#\1#' || true)"
 else
@@ -76,7 +56,6 @@ fi
 echo ">> $P_DISPLAY $VERSION   arch=$ARCH ($DEB_ARCH/$RPM_ARCH)   channel=$CHANNEL"
 echo ">> URL: $URL"
 
-# --- Download + extract ------------------------------------------------------
 curl -fsSL "$URL" -o "$WORK/antigravity.tar.gz"
 mkdir -p "$WORK/ex"
 tar -xzf "$WORK/antigravity.tar.gz" -C "$WORK/ex"
@@ -84,7 +63,6 @@ TOPDIR="$(find "$WORK/ex" -mindepth 1 -maxdepth 1 -type d | head -1)"
 [ -d "$TOPDIR" ] || { echo "tarball has no top-level directory" >&2; exit 1; }
 echo ">> upstream top-level dir: $(basename "$TOPDIR")"
 
-# --- Stage payload (= ${P_INST}) ---------------------------------------------
 rm -rf "$BUILD"; mkdir -p "$BUILD/payload" "$BUILD/scripts" "$BUILD/icons"
 shopt -s dotglob nullglob
 mv "$TOPDIR"/* "$BUILD/payload/"
@@ -92,7 +70,6 @@ shopt -u dotglob nullglob
 [ -f "$BUILD/payload/chrome-sandbox" ] && chmod 4755 "$BUILD/payload/chrome-sandbox"
 chmod +x "$BUILD/payload/$P_BIN" 2>/dev/null || true
 
-# --- Render templates + stage icons ------------------------------------------
 NFPM_ARCH="$DEB_ARCH"
 export PKG_NAME P_BIN P_INST P_DISPLAY P_GENERIC P_ICON P_WMCLASS P_SCHEME \
        VERSION BUILD_ID NFPM_ARCH
@@ -107,7 +84,6 @@ chmod +x "$BUILD/wrapper" "$BUILD/scripts/postinst" "$BUILD/scripts/prerm" "$BUI
 
 cp -R "$ROOT/packaging/icons/${PKG_NAME}/hicolor" "$BUILD/icons/hicolor"
 
-# --- Build .deb and .rpm -----------------------------------------------------
 mkdir -p "$DIST"
 DEB_NAME="${PKG_NAME}_${VERSION}_${DEB_ARCH}.deb"
 RPM_NAME="${PKG_NAME}-${VERSION}.${RPM_ARCH}.rpm"

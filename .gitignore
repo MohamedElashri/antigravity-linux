@@ -1,17 +1,14 @@
-# build / packaging outputs
 /build/
 /dist/
 /sources/
 /work/
 
-# downloaded artifacts
 *.tar.gz
 *.deb
 *.rpm
 *.sig
 checksums_*.txt
 
-# local env / editor
 .env
 .DS_Store
 *.swp

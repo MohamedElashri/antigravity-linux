@@ -1,14 +1,8 @@
 name: keepalive
 
-# Keep the repository active so GitHub does not auto-disable the scheduled
-# `package` workflow after 60 days of inactivity. Makes an empty weekly commit,
-# which counts as repo activity and resets the inactivity clock. No third-party
-# action: just an empty commit + push. The commit is made by the GITHUB_TOKEN,
-# so it does not trigger the `package` workflow (which only runs on
-# schedule/workflow_dispatch).
 on:
   schedule:
-    - cron: "13 6 * * 1"   # weekly, Monday 06:13 UTC (off the round minute)
+    - cron: "13 6 * * 1"
   workflow_dispatch:
 
 permissions:
