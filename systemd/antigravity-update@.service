@@ -1,0 +1,10 @@
+[Unit]
+Description=Update unofficial %i Debian package
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/update-antigravity %i
+TimeoutStartSec=30min
+UMask=0077

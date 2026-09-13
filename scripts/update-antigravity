@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Install unofficial .deb releases from MohamedElashri/antigravity-linux.
+set -euo pipefail
+
+usage() { echo "Usage: $0 [--check] [antigravity|antigravity-ide]"; }
+CHECK=false
+PRODUCT=antigravity
+while (($#)); do
+  case "$1" in
+    --check) CHECK=true ;;
+    antigravity|antigravity-ide) PRODUCT="$1" ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
+log() { printf '[%s] %s\n' "$(date -Is)" "$*"; }
+fail() { log "ERROR: $*" >&2; exit 1; }
+for cmd in curl jq dpkg dpkg-query dpkg-deb sha256sum flock; do
+  command -v "$cmd" >/dev/null || fail "Required command not found: $cmd"
+done
+$CHECK || [[ $EUID == 0 ]] || fail "Run with sudo to install, or use --check."
+ARCH=$(dpkg --print-architecture)
+case "$ARCH" in amd64|arm64) ;; *) fail "Unsupported architecture: $ARCH" ;; esac
+if ! $CHECK; then
+  command -v apt-get >/dev/null || fail 'apt-get is required'
+  exec 9>/run/lock/antigravity-update.lock
+  flock -n 9 || { log 'Another updater is running.'; exit 0; }
+fi
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+fetch() { curl --fail --silent --show-error --location --retry 3 --connect-timeout 20 --max-time 600 --proto '=https' --proto-redir '=https' "$1" -o "$2"; }
+REPO=MohamedElashri/antigravity-linux
+BEST=''
+# Releases for both products share this repository. Inspect every page and use
+# Debian version ordering, not publication time or the repository's latest tag.
+PAGE=1
+while :; do
+  fetch "https://api.github.com/repos/$REPO/releases?per_page=100&page=$PAGE" "$WORK/releases.json"
+  jq -e 'type == "array"' "$WORK/releases.json" >/dev/null || fail 'Invalid releases response'
+  while IFS=$'\t' read -r VERSION DEB_URL SUM_URL; do
+    [[ -n "$VERSION" ]] || continue
+    dpkg --validate-version "$VERSION" 2>/dev/null || continue
+    if [[ -z "$BEST" ]] || dpkg --compare-versions "$VERSION" gt "$BEST"; then
+      BEST=$VERSION
+      PACKAGE_URL=$DEB_URL
+      CHECKSUM_URL=$SUM_URL
+    fi
+  done < <(jq -r --arg p "$PRODUCT" --arg a "$ARCH" '
+    .[] | select(.draft == false and .prerelease == false)
+    | select(.tag_name | startswith($p + "-v"))
+    | . as $r | (.tag_name | ltrimstr($p + "-v")) as $v
+    | [$r.assets[] | select(.name == ($p + "_" + $v + "_" + $a + ".deb"))] as $deb
+    | [$r.assets[] | select(.name == ("checksums_" + $p + "_" + $v + ".txt"))] as $sum
+    | select(($deb|length) == 1 and ($sum|length) == 1)
+    | [$v, $deb[0].browser_download_url, $sum[0].browser_download_url] | @tsv
+  ' "$WORK/releases.json")
+  [[ $(jq 'length' "$WORK/releases.json") -eq 100 ]] || break
+  PAGE=$((PAGE + 1))
+done
+[[ -n "$BEST" ]] || fail "No complete stable release found for $PRODUCT ($ARCH)"
+NAME="${PRODUCT}_${BEST}_${ARCH}.deb"
+PREFIX="https://github.com/$REPO/releases/download/${PRODUCT}-v${BEST}/"
+[[ "$PACKAGE_URL" == "$PREFIX$NAME" && "$CHECKSUM_URL" == "${PREFIX}checksums_${PRODUCT}_${BEST}.txt" ]] || fail 'Unexpected release asset URL'
+fetch "$CHECKSUM_URL" "$WORK/checksums.txt"
+fetch "$PACKAGE_URL" "$WORK/$NAME"
+HASH=$(awk -v name="$NAME" '$2 == name || $2 == "*" name {print $1}' "$WORK/checksums.txt")
+[[ "$HASH" =~ ^[[:xdigit:]]{64}$ ]] || fail 'Missing or ambiguous package checksum'
+printf '%s  %s\n' "$HASH" "$WORK/$NAME" | sha256sum --check --status || fail 'Checksum mismatch'
+[[ $(dpkg-deb -f "$WORK/$NAME" Package) == "$PRODUCT" ]] || fail 'Package name mismatch'
+[[ $(dpkg-deb -f "$WORK/$NAME" Architecture) == "$ARCH" ]] || fail 'Package architecture mismatch'
+VERSION=$(dpkg-deb -f "$WORK/$NAME" Version)
+dpkg --validate-version "$VERSION" || fail 'Invalid package version'
+# nfpm adds epoch 0 and Debian revision 1; compare the full package version.
+dpkg --compare-versions "$VERSION" eq "0:${BEST}-1" || fail 'Package version does not match release'
+INSTALLED=''
+if [[ $(dpkg-query -W -f='${Status}' "$PRODUCT" 2>/dev/null || true) == 'install ok installed' ]]; then
+  INSTALLED=$(dpkg-query -W -f='${Version}' "$PRODUCT")
+fi
+if [[ -n "$INSTALLED" ]] && dpkg --compare-versions "$VERSION" le "$INSTALLED"; then
+  log "No upgrade: installed $INSTALLED, available $VERSION (downgrades refused)."
+  exit 0
+fi
+log "$PRODUCT ($ARCH): ${INSTALLED:-not installed} -> $VERSION"
+$CHECK && { log 'Check only; verified package, no installation performed.'; exit 0; }
+# Let apt resolve dependencies in the same transaction; never allow downgrades.
+DEBIAN_FRONTEND=noninteractive apt-get install --yes "$WORK/$NAME"
+log "Installed $PRODUCT $VERSION. Restart the application to use the update."
