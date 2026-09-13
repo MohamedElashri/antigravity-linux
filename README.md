@@ -28,7 +28,7 @@ This is an unofficial community packaging. All software and trademarks belong to
 
 ## Automatic Debian/Ubuntu updates
 
-The updater follows the script-and-systemd approach in [my Thunderbird article](https://blog.melashri.net/posts/thunderbird-auto-update-linux/), using this repository's **unofficial GitHub Releases** as its source. It supports `antigravity` (default) and `antigravity-ide`, on `amd64` and `arm64`.
+The updater installs packages from this repository's **unofficial GitHub Releases**, with systemd timers for automatic updates. It supports `antigravity` (default) and `antigravity-ide`, on `amd64` and `arm64`.
 
 It scans published, non-prerelease releases for the requested product, chooses the highest Debian version with both a package and checksum asset, verifies SHA-256 and package metadata, and refuses equal-version installs or downgrades. Checksums detect corruption; they are supplied by the same repository and are not independent signatures. Enabling automatic installation means trusting this repository's release packages and their maintainer scripts.
 

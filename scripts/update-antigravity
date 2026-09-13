@@ -27,7 +27,8 @@ if ! $CHECK; then
   exec 9>/run/lock/antigravity-update.lock
   flock -n 9 || { log 'Another updater is running.'; exit 0; }
 fi
-WORK=$(mktemp -d)
+# Use a traversable parent even when sudo preserves a private TMPDIR.
+WORK=$(mktemp -d /tmp/antigravity-update.XXXXXXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 fetch() { curl --fail --silent --show-error --location --retry 3 --connect-timeout 20 --max-time 600 --proto '=https' --proto-redir '=https' "$1" -o "$2"; }
 REPO=MohamedElashri/antigravity-linux
@@ -83,6 +84,11 @@ if [[ -n "$INSTALLED" ]] && dpkg --compare-versions "$VERSION" le "$INSTALLED"; 
 fi
 log "$PRODUCT ($ARCH): ${INSTALLED:-not installed} -> $VERSION"
 $CHECK && { log 'Check only; verified package, no installation performed.'; exit 0; }
+# apt reads local packages as _apt. Allow traversal and package reads without
+# allowing other users to list or modify the temporary directory's contents.
+# Set the file mode explicitly because the systemd service uses UMask=0077.
+chmod 0711 "$WORK"
+chmod 0644 "$WORK/$NAME"
 # Let apt resolve dependencies in the same transaction; never allow downgrades.
 DEBIAN_FRONTEND=noninteractive apt-get install --yes "$WORK/$NAME"
 log "Installed $PRODUCT $VERSION. Restart the application to use the update."
